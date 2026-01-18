@@ -123,13 +123,14 @@ class _CameraScreenState extends State<CameraScreen> {
   void _showResultDialog(String label, File image) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
+      isScrollControlled: true, // Allows the sheet to be taller
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.5,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        // Make it take up 75% of the screen so the image is big
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor, // Uses your Dark/Light theme
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -138,42 +139,57 @@ class _CameraScreenState extends State<CameraScreen> {
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 20),
             
+            // --- NEW: IMAGE PREVIEW ---
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.file(
+                  image, 
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            // --------------------------
+
             Text("Identified Item", style: AppTextStyles.body),
             const SizedBox(height: 10),
             
-            // Result Text
             Text(
               label.toUpperCase(),
               style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.primary),
               textAlign: TextAlign.center,
             ),
             
-            const Spacer(),
+            const SizedBox(height: 24),
             
             // Action Buttons
             Row(
               children: [
                 Expanded(
-                  child: // Inside the Retry Button
-                  OutlinedButton(
+                  child: OutlinedButton(
                     onPressed: () async {
                       Navigator.pop(context);
-                      // Add this line to turn the camera back on
-                      await _controller?.resumePreview(); 
+                      // Important: Turn camera back on if they retry
+                      await _controller?.resumePreview();
                     },
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                    child: const Text("Retry"),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: const BorderSide(color: AppColors.primary), // Green border
+                    ),
+                    child: const Text("Retry", style: TextStyle(color: AppColors.primary)),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () async {
-                      // Save to History
+                      // Save to History (Text Data)
                       await HistoryService.addScan(label, 0.95, "Eco Scan");
                       if (context.mounted) {
                         Navigator.pop(context); // Close dialog
-                        Navigator.pop(context); // Close camera, go back to Home
+                        Navigator.pop(context); // Close camera
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text("Saved to Eco History!"), backgroundColor: Colors.green),
                         );
