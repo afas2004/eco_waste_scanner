@@ -2,10 +2,10 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ScanRecord {
-  final String result;     // e.g. "7" or "012"
-  final double confidence; // e.g. 0.98
+  final String result;
+  final double confidence;
   final DateTime date;
-  final String type;       // "Camera" or "Drawing"
+  final String type;
 
   ScanRecord({
     required this.result,
@@ -14,7 +14,6 @@ class ScanRecord {
     required this.type,
   });
 
-  // Convert object to Text (JSON) to save
   Map<String, dynamic> toJson() => {
     'result': result,
     'confidence': confidence,
@@ -22,13 +21,16 @@ class ScanRecord {
     'type': type,
   };
 
-  // Convert Text (JSON) back to object to read
   factory ScanRecord.fromJson(Map<String, dynamic> json) {
     return ScanRecord(
-      result: json['result'],
-      confidence: json['confidence'] ?? 0.0,
-      date: DateTime.parse(json['date']),
-      type: json['type'] ?? 'Camera',
+      // Default to "Unknown" if data is missing (Prevents Crashes)
+      result: json['result'] ?? "Unknown Item",
+      // Handle cases where confidence might be stored as int or double
+      confidence: (json['confidence'] is int) 
+          ? (json['confidence'] as int).toDouble() 
+          : (json['confidence'] ?? 0.0),
+      date: DateTime.tryParse(json['date'] ?? "") ?? DateTime.now(),
+      type: json['type'] ?? 'Eco Scan',
     );
   }
 }
@@ -36,14 +38,11 @@ class ScanRecord {
 class HistoryService {
   static const String _key = 'scan_history';
 
-  // Save a new scan
+  // Add a new scan
   static Future<void> addScan(String result, double confidence, String type) async {
     final prefs = await SharedPreferences.getInstance();
-    
-    // 1. Get existing list
     List<String> historyList = prefs.getStringList(_key) ?? [];
     
-    // 2. Create new record
     final newRecord = ScanRecord(
       result: result,
       confidence: confidence,
@@ -51,24 +50,30 @@ class HistoryService {
       type: type,
     );
     
-    // 3. Add to top of list (JSON format)
+    // Add to top
     historyList.insert(0, jsonEncode(newRecord.toJson()));
-    
-    // 4. Save back to storage
     await prefs.setStringList(_key, historyList);
   }
 
-  // Get all scans
+  // Get all scans (with error handling)
   static Future<List<ScanRecord>> getHistory() async {
     final prefs = await SharedPreferences.getInstance();
     List<String> historyList = prefs.getStringList(_key) ?? [];
     
-    return historyList
-        .map((item) => ScanRecord.fromJson(jsonDecode(item)))
-        .toList();
+    List<ScanRecord> cleanList = [];
+    
+    for (String item in historyList) {
+      try {
+        // Try to decode. If it fails (old data), skip it.
+        final decoded = jsonDecode(item);
+        cleanList.add(ScanRecord.fromJson(decoded));
+      } catch (e) {
+        print("Skipping corrupted record: $e");
+      }
+    }
+    return cleanList;
   }
 
-  // Clear all
   static Future<void> clearHistory() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_key);

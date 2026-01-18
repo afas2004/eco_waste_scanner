@@ -16,6 +16,7 @@ dependencies:
   signature: ^5.0.0
   shared_preferences: ^2.2.2
   
+  
   # UI/UX
   google_fonts: ^6.1.0
   intl: ^0.19.0   # For dates in history
@@ -24,10 +25,19 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.11.0
 
 flutter:
   uses-material-design: true
   assets:
-    - assets/mnist.tflite
+    - assets/model.tflite
     - assets/labels.txt
     - assets/background.jpg
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon.png"
+  min_sdk_android: 21 # Helps with adaptive icons
+  adaptive_icon_background: "#051F0E" # Matches your Dark Green theme!
+  adaptive_icon_foreground: "assets/icon.png"

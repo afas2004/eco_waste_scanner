@@ -19,18 +19,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _loadData();
   }
 
-  // Reload data whenever this screen appears
   Future<void> _loadData() async {
     final data = await HistoryService.getHistory();
-    setState(() {
-      _records = data;
-    });
+    if (mounted) setState(() => _records = data);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Dynamic Text Colors
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subTextColor = isDark ? Colors.white70 : Colors.black54;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("Scan History"),
         centerTitle: true,
@@ -41,13 +43,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
             icon: const Icon(Icons.delete_outline, color: Colors.red),
             onPressed: () async {
               await HistoryService.clearHistory();
-              _loadData(); // Refresh UI
+              _loadData();
             },
           )
         ],
       ),
       body: _records.isEmpty
-          ? const Center(child: Text("No scans yet. Start digitizing!"))
+          ? Center(child: Text("No scans yet.", style: TextStyle(color: subTextColor)))
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _records.length,
@@ -56,28 +58,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 return Card(
                   elevation: 0,
                   margin: const EdgeInsets.only(bottom: 12),
+                  color: Theme.of(context).cardColor, // <--- DYNAMIC COLOR
                   shape: RoundedRectangleBorder(
-                    side: BorderSide(color: Colors.grey.shade200),
+                    side: BorderSide(color: isDark ? Colors.transparent : Colors.grey.shade200),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: record.type == "Drawing" 
-                          ? Colors.purple.withOpacity(0.1) 
-                          : AppColors.primary.withOpacity(0.1),
-                      child: Icon(
-                        record.type == "Drawing" ? Icons.gesture : Icons.camera_alt,
-                        color: record.type == "Drawing" ? Colors.purple : AppColors.primary,
-                        size: 20,
-                      ),
+                      backgroundColor: AppColors.primary.withOpacity(0.1),
+                      child: const Icon(Icons.eco, color: AppColors.primary, size: 20),
                     ),
                     title: Text(
                       record.result,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor), // <--- DYNAMIC
                     ),
                     subtitle: Text(
-                      "${record.type} • ${DateFormat('MMM d, h:mm a').format(record.date)}",
-                      style: const TextStyle(fontSize: 12),
+                      DateFormat('MMM d, h:mm a').format(record.date),
+                      style: TextStyle(fontSize: 12, color: subTextColor), // <--- DYNAMIC
                     ),
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:handwritten_digit_scanner/screens/drawing_screen.dart';
 import '../utils/styles.dart';
 import 'home_screen.dart';
 import 'history_screen.dart';
 import 'camera_screen.dart';
 import 'profile_screen.dart';
+import 'settings_screen.dart'; // Add this import
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -17,23 +17,29 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   
+  // The 4 main pages for the bottom bar
   final List<Widget> _pages = [
     const HomeScreen(),
-    const DrawingScreen(), // Added here as Index 1
-    const HistoryScreen(), // Moved to Index 2
-    const ProfileScreen(), // Moved to Index 3
+    const HistoryScreen(),
+    const ProfileScreen(),
+    const SettingsScreen(), // Moved Settings to the bottom bar for symmetry
   ];
 
-  void _onScanPressed() {
-    Navigator.of(context).push(
+  void _onScanPressed() async {
+    // Open Camera
+    await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const CameraScreen()),
     );
+    // When we return, if we are on Home or History, trigger a rebuild to show new data
+    setState(() {}); 
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: _pages[_currentIndex],
+      
+      // The Big Scan Button
       floatingActionButton: SizedBox(
         height: 70,
         width: 70,
@@ -46,21 +52,35 @@ class _MainShellState extends State<MainShell> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      
+      // The Navigation Bar
       bottomNavigationBar: BottomAppBar(
         shape: const CircularNotchedRectangle(),
         notchMargin: 10.0,
-        color: AppColors.surface,
+        color: Theme.of(context).cardColor,
         elevation: 10,
         child: SizedBox(
           height: 60,
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween, // Use spaceBetween for even spacing
             children: [
-              _buildTabItem(0, Icons.dashboard_rounded, "Home"),
-              _buildTabItem(1, Icons.gesture, "Draw"), // New Tab
-              const SizedBox(width: 40), // Space for FAB (Scanner)
-              _buildTabItem(2, Icons.history_rounded, "History"),
-              _buildTabItem(3, Icons.person_rounded, "Profile"), // Optional 4th tab for balance, or just leave it empty
+              // Left Side
+              Row(
+                children: [
+                  _buildTabItem(0, Icons.dashboard_rounded, "Home"),
+                  const SizedBox(width: 20), // Spacing between icons
+                  _buildTabItem(1, Icons.history_rounded, "History"),
+                ],
+              ),
+              
+              // Right Side (Profile & Settings)
+              Row(
+                children: [
+                  _buildTabItem(2, Icons.person_rounded, "Profile"),
+                  const SizedBox(width: 20), 
+                  _buildTabItem(3, Icons.settings_rounded, "Settings"),
+                ],
+              ),
             ],
           ),
         ),
@@ -72,16 +92,27 @@ class _MainShellState extends State<MainShell> {
     final isSelected = _currentIndex == index;
     return InkWell(
       onTap: () => setState(() => _currentIndex = index),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: isSelected ? AppColors.primary : Colors.grey, size: 28),
-          Text(label, style: GoogleFonts.inter(
-            fontSize: 12, 
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-            color: isSelected ? AppColors.primary : Colors.grey
-          )),
-        ],
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon, 
+              color: isSelected ? AppColors.primary : Colors.grey.shade400, 
+              size: 26
+            ),
+            Text(
+              label, 
+              style: GoogleFonts.inter(
+                fontSize: 10, 
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? AppColors.primary : Colors.grey.shade400
+              )
+            ),
+          ],
+        ),
       ),
     );
   }

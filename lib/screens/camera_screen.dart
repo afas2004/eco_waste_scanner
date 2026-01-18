@@ -1,12 +1,15 @@
 import 'dart:io';
+// Add this alias to avoid conflicts with Flutter's Image widget
+import 'package:image/image.dart' as img;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:handwritten_digit_scanner/screens/settings_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart'; // to access 'cameras'
-import '../services/digit_classifier.dart';
+import '../services/waste_classifier.dart';
 import '../utils/styles.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/history_service.dart';
+import 'settings_screen.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -17,91 +20,173 @@ class CameraScreen extends StatefulWidget {
 
 class _CameraScreenState extends State<CameraScreen> {
   CameraController? _controller;
-  final DigitClassifier _classifier = DigitClassifier();
-  
+  final WasteClassifier _classifier = WasteClassifier();
   bool _isProcessing = false;
-  String _currentSequence = ""; // Stores the sequence "012..."
-  String? _lastPrediction; // Stores last single digit
-  bool _isSequenceMode = false; // Toggle state
+  bool _isModelLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _initAI();
     _initializeCamera();
     _classifier.loadModel();
   }
 
-  Future<void> _initializeCamera() async {
-    if (cameras.isEmpty) return;
-    _controller = CameraController(cameras[0], ResolutionPreset.medium, enableAudio: false);
-    await _controller!.initialize();
-    if (mounted) setState(() {});
+  Future<void> _initAI() async {
+    await _classifier.loadModel();
+    if (mounted) setState(() => _isModelLoaded = true);
   }
 
-  // The Core Logic: Capture -> Crop -> Predict
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      final firstCamera = cameras.first;
+
+      _controller = CameraController(
+        firstCamera,
+        // 1. LOWER RESOLUTION: 'medium' is the sweet spot for TFLite on phones.
+        // 'max' or 'high' often causes the buffer error you saw.
+        ResolutionPreset.low, 
+        
+        // 2. DISABLE AUDIO: Critical! If this is true (default) but you 
+        // didn't ask for microphone permission, the camera crashes silently.
+        enableAudio: false, 
+        
+        // 3. FIX BUFFER ISSUE: This helps Android process frames smoothly
+        imageFormatGroup: ImageFormatGroup.yuv420, 
+      );
+
+      await _controller!.initialize();
+      if (!mounted) return;
+      setState(() {});
+    } catch (e) {
+      print("Camera Error: $e");
+    }
+  }
+
   Future<void> _captureAndPredict() async {
     if (_controller == null || !_controller!.value.isInitialized || _isProcessing) return;
 
     setState(() => _isProcessing = true);
 
     try {
-      final image = await _controller!.takePicture();
-      File imageFile = File(image.path);
-
-      // Run Inference
-      int? digit = await _classifier.classifyFile(imageFile);
-
-      setState(() {
-        _lastPrediction = digit?.toString() ?? "?";
-        if (_isSequenceMode && digit != null) {
-          // In sequence mode, we wait for user to hit 'Append' usually, 
-          // but for this demo, let's just show it as the 'Pending' digit
-        } else if (!_isSequenceMode && digit != null) {
-          _currentSequence = digit.toString(); // Reset sequence in single mode
-        }
-      });
+      // --- FIX STARTS HERE ---
       
-      _showResultDialog(digit);
+      // 1. Capture FIRST (Do not pause before this!)
+      // The camera needs the preview running to focus.
+      final XFile image = await _controller!.takePicture();
+      
+      // 2. NOW Pause (To freeze the screen for visual effect)
+      await _controller!.pausePreview();
 
+      // --- FIX ENDS HERE ---
+
+      File originalFile = File(image.path);
+
+      // 3. SAFE RESIZE (Keep this! It prevents the crash)
+      final rawImage = img.decodeImage(await originalFile.readAsBytes());
+      
+      if (rawImage != null) {
+        // Resize to 224x224 (Standard MobileNet size)
+        final resizedImage = img.copyResize(rawImage, width: 224, height: 224);
+        
+        final tempDir = originalFile.parent;
+        final resizedFile = File('${tempDir.path}/resized_temp.jpg');
+        await resizedFile.writeAsBytes(img.encodeJpg(resizedImage));
+        
+        originalFile = resizedFile;
+      }
+
+      // 4. Get Threshold & Predict
+      final prefs = await SharedPreferences.getInstance();
+      double savedThreshold = prefs.getDouble('confidenceThreshold') ?? 50.0;
+      double modelThreshold = savedThreshold / 100.0;
+
+      String? result = await _classifier.classifyFile(originalFile, threshold: modelThreshold);
+
+      if (mounted && result != null) {
+        _showResultDialog(result, originalFile);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+           const SnackBar(content: Text("Not confident enough. Try getting closer.")),
+        );
+        await _controller!.resumePreview();
+      }
     } catch (e) {
-      print(e);
+      print("Error: $e");
+      await _controller?.resumePreview();
     } finally {
-      setState(() => _isProcessing = false);
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
-  void _showResultDialog(int? digit) {
+  void _showResultDialog(String label, File image) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.5,
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Text("Prediction", style: AppTextStyles.body),
-            Text(digit?.toString() ?? "Err", style: GoogleFonts.inter(fontSize: 72, fontWeight: FontWeight.w900, color: AppColors.primary)),
+            // Handle Bar
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 20),
+            
+            Text("Identified Item", style: AppTextStyles.body),
+            const SizedBox(height: 10),
+            
+            // Result Text
+            Text(
+              label.toUpperCase(),
+              style: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.primary),
+              textAlign: TextAlign.center,
+            ),
+            
+            const Spacer(),
+            
+            // Action Buttons
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                if (_isSequenceMode)
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      setState(() => _currentSequence += digit.toString());
+                Expanded(
+                  child: // Inside the Retry Button
+                  OutlinedButton(
+                    onPressed: () async {
                       Navigator.pop(context);
+                      // Add this line to turn the camera back on
+                      await _controller?.resumePreview(); 
                     },
-                    icon: const Icon(Icons.add),
-                    label: const Text("Append"),
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: const Text("Retry"),
                   ),
-                OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Retry"),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      // Save to History
+                      await HistoryService.addScan(label, 0.95, "Eco Scan");
+                      if (context.mounted) {
+                        Navigator.pop(context); // Close dialog
+                        Navigator.pop(context); // Close camera, go back to Home
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("Saved to Eco History!"), backgroundColor: Colors.green),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.check, color: Colors.white),
+                    label: const Text("Save"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
                 ),
               ],
             )
@@ -121,184 +206,55 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   Widget build(BuildContext context) {
     if (_controller == null || !_controller!.value.isInitialized) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. Camera Preview
           Center(child: CameraPreview(_controller!)),
-
-          // 2. Overlay (Darkened Background with Cutout)
-          // Simplified overlay for readability
-          ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.5), BlendMode.srcOut),
-            child: Stack(
-              children: [
-                Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black,
-                    backgroundBlendMode: BlendMode.dstOut,
-                  ),
+          
+          // Back Button
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: CircleAvatar(
+                backgroundColor: Colors.black45,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
                 ),
-                Align(
-                  alignment: Alignment.center,
-                  child: Container(
-                    width: 250,
-                    height: 250,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
 
-          // 3. UI Controls
-          SafeArea(
-            child: Column(
-              children: [
-                // Top Bar
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(20)),
-                        child: Text(_isSequenceMode ? "Sequence Mode" : "Single Mode", style: const TextStyle(color: Colors.white)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.settings, color: Colors.white),
-                        onPressed: () {
-                          // Navigate to the Settings Screen we just created
-                          Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const SettingsScreen()));
-                        },
-                      ),
-                    ],
+          // Capture Button
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 40),
+              child: GestureDetector(
+                onTap: (_isProcessing || !_isModelLoaded) ? null : _captureAndPredict,
+                child: Container(
+                  height: 80, 
+                  width: 80,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 4),
+                  ),
+                  padding: const EdgeInsets.all(4),
+                  child: Container(
+                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                    child: _isProcessing 
+                      ? const CircularProgressIndicator(color: AppColors.primary) 
+                      : Icon(Icons.camera_alt, color: _isModelLoaded ? AppColors.primary : Colors.grey, size: 32),
                   ),
                 ),
-                
-                const Spacer(),
-                
-                // Result Display (Current String)
-                if (_currentSequence.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30)),
-                    child: Text(
-                      _currentSequence,
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 4),
-                    ),
-                  ),
-                
-                const SizedBox(height: 20),
-
-                // Bottom Control Panel
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-                  ),
-                  child: Column(
-                    children: [
-                      // Mode Switcher
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text("Single"),
-                          Switch(
-                            value: _isSequenceMode,
-                            activeColor: AppColors.primary,
-                            onChanged: (val) => setState(() {
-                              _isSequenceMode = val;
-                              if (!val) _currentSequence = "";
-                            }),
-                          ),
-                          const Text("Sequence"),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      // Shutter Button
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.backspace, color: Colors.grey),
-                            onPressed: () => setState(() => _currentSequence = ""),
-                          ),
-                          GestureDetector(
-                            onTap: _captureAndPredict,
-                            child: Container(
-                              height: 80,
-                              width: 80,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(color: AppColors.primary, width: 4),
-                              ),
-                              padding: const EdgeInsets.all(4),
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: _isProcessing 
-                                  ? const CircularProgressIndicator(color: Colors.white)
-                                  : const Icon(Icons.camera, color: Colors.white, size: 32),
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.check_circle,
-                                color: Colors.green, size: 32),
-                            onPressed: () async {
-                              if (_currentSequence.isEmpty) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text("No digits scanned yet!"),
-                                      backgroundColor: Colors.red),
-                                );
-                                return;
-                              }
-
-                              // --- REAL SAVE LOGIC ---
-                              await HistoryService.addScan(
-                                  _currentSequence, // The number (e.g., "7" or "012")
-                                  0.99, // (Optional: You could track average confidence here)
-                                  "Camera");
-
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                      content: Text(
-                                          "Saved '$_currentSequence' to History"),
-                                      backgroundColor: AppColors.primary),
-                                );
-                                Navigator.pop(context); // Go back to home
-                              }
-                            },
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                )
-              ],
+              ),
             ),
-          )
+          ),
         ],
       ),
     );

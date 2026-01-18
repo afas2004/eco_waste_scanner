@@ -6,20 +6,17 @@ import 'utils/styles.dart';
 
 List<CameraDescription> cameras = [];
 
-// Global Theme Controller
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. Load Camera
   try {
     cameras = await availableCameras();
   } on CameraException catch (e) {
     print('Error: $e.code\nError Message: $e.message');
   }
 
-  // 2. Load Saved Dark Mode Preference
   final prefs = await SharedPreferences.getInstance();
   final isDark = prefs.getBool('isDarkMode') ?? false;
   themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
@@ -36,31 +33,42 @@ class MyApp extends StatelessWidget {
       valueListenable: themeNotifier,
       builder: (_, mode, __) {
         return MaterialApp(
-          title: 'Digitize',
+          title: 'EcoScan',
           debugShowCheckedModeBanner: false,
           themeMode: mode,
-          // Light Theme
+          
+          // --- LIGHT THEME (Day) ---
           theme: ThemeData(
             primaryColor: AppColors.primary,
-            scaffoldBackgroundColor: AppColors.background,
+            scaffoldBackgroundColor: const Color(0xFFF1F8E9), // Light Mint
+            cardColor: Colors.white,
             brightness: Brightness.light,
             useMaterial3: true,
+            appBarTheme: const AppBarTheme(
+              iconTheme: IconThemeData(color: Colors.black),
+              titleTextStyle: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ),
-          // Dark Theme
+
+          // --- DARK ECO THEME (Night) ---
           darkTheme: ThemeData(
             primaryColor: AppColors.primary,
-            scaffoldBackgroundColor: const Color(0xFF121217), // Dark Background
+            // Use a Very Dark Green instead of Black
+            scaffoldBackgroundColor: const Color(0xFF051F0E), 
+            // Use a Deep Forest Green for Cards
+            cardColor: const Color(0xFF0F2E1B), 
             brightness: Brightness.dark,
             useMaterial3: true,
             appBarTheme: const AppBarTheme(
               iconTheme: IconThemeData(color: Colors.white),
-              titleTextStyle: TextStyle(color: Colors.white, fontSize: 20),
+              titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
             ),
             textTheme: const TextTheme(
-              bodyMedium: TextStyle(color: Colors.white70),
+              bodyMedium: TextStyle(color: Color(0xFFE8F5E9)), // Light Green Text
               bodyLarge: TextStyle(color: Colors.white),
             ),
           ),
+          
           home: const MainShell(),
         );
       },
